@@ -4,17 +4,40 @@ import { parseHandshakePayload } from "./lib/qr/scan.ts";
 import { ConnectionStateMachine, type StateError } from "./lib/state/machine.ts";
 import { ReceiverSession, SenderSession } from "./lib/webrtc/peer.ts";
 import { FileReceiver, FileSender, type QueuedFile, type ReceivedFile, type TransferProgress } from "./lib/protocol/transfer.ts";
+import { extractFilesFromDataTransfer, extractFilesFromInput, type DiscoveredFile } from "./lib/folder.ts";
+import { createDemoImageFile, createTextSnippetFile } from "./lib/snippet.ts";
 import { QrCard } from "./components/QrCard.tsx";
 import { ScannerModal } from "./components/ScannerModal.tsx";
 import { TransferView } from "./components/TransferView.tsx";
+import { Stepper, type StepItem } from "./components/Stepper.tsx";
+import { HelpPanel } from "./components/HelpPanel.tsx";
+
+const SENDER_STEPS: StepItem[] = [
+  { id: "select", label: "Select", sublabel: "Files or text" },
+  { id: "pair", label: "Pair", sublabel: "QR handshake" },
+  { id: "transfer", label: "Transfer", sublabel: "Direct stream" },
+  { id: "done", label: "Done", sublabel: "Verified" },
+];
+
+const RECEIVER_STEPS: StepItem[] = [
+  { id: "scan", label: "Connect", sublabel: "Scan sender" },
+  { id: "pair", label: "Answer", sublabel: "Complete pair" },
+  { id: "transfer", label: "Transfer", sublabel: "Direct stream" },
+  { id: "done", label: "Done", sublabel: "Verified" },
+];
 
 export const App: React.FC = () => {
   const [role, setRole] = useState<"sender" | "receiver" | null>(null);
   const [status, setStatus] = useState<string>("idle");
   const [error, setError] = useState<StateError | null>(null);
 
+  // Send mode: files vs text snippet
+  const [sendMode, setSendMode] = useState<"files" | "text">("files");
+  const [textSnippet, setTextSnippet] = useState<string>("");
+  const [snippetTitle, setSnippetTitle] = useState<string>("");
+
   // Sender state
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [selectedDiscoveredFiles, setSelectedDiscoveredFiles] = useState<DiscoveredFile[]>([]);
   const [offerCompressed, setOfferCompressed] = useState<string>("");
   const [offerUrl, setOfferUrl] = useState<string>("");
   const [manualAnswer, setManualAnswer] = useState<string>("");
@@ -36,7 +59,8 @@ export const App: React.FC = () => {
   const receiverSessionRef = useRef<ReceiverSession | null>(null);
   const fileSenderRef = useRef<FileSender | null>(null);
   const fileReceiverRef = useRef<FileReceiver | null>(null);
-  const dropzoneRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
   // Subscribe to state machine transitions
@@ -98,7 +122,7 @@ export const App: React.FC = () => {
       };
 
       receiver.onError = (err) => {
-        if (err.message.includes("checksum")) {
+        if (err.message.includes("checksum") || err.message.includes("Integrity")) {
           smRef.current.fail("checksum-mismatch", err.message);
         } else {
           smRef.current.fail("generic", err.message);
@@ -144,7 +168,10 @@ export const App: React.FC = () => {
     setRole(null);
     setStatus("idle");
     setError(null);
-    setSelectedFiles([]);
+    setSelectedDiscoveredFiles([]);
+    setSendMode("files");
+    setTextSnippet("");
+    setSnippetTitle("");
     setOfferCompressed("");
     setOfferUrl("");
     setManualAnswer("");
@@ -161,19 +188,71 @@ export const App: React.FC = () => {
     }
   };
 
-  // --- Sender Logic ---
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // --- Sender Handlers ---
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      setSelectedFiles((prev) => [...prev, ...Array.from(e.target.files!)]);
+      const discovered = extractFilesFromInput(e.target.files);
+      setSelectedDiscoveredFiles((prev) => [...prev, ...discovered]);
+    }
+  };
+
+  const handleFolderInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const discovered = extractFilesFromInput(e.target.files);
+      setSelectedDiscoveredFiles((prev) => [...prev, ...discovered]);
     }
   };
 
   const removeFile = (index: number) => {
-    setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
+    setSelectedDiscoveredFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const discovered = await extractFilesFromDataTransfer(e.dataTransfer);
+    if (discovered.length > 0) {
+      setSelectedDiscoveredFiles((prev) => [...prev, ...discovered]);
+    }
+  };
+
+  // Presets
+  const applySampleNotePreset = () => {
+    setRole("sender");
+    smRef.current.setRole("sender");
+    setSendMode("text");
+    setTextSnippet("Hello from qrtc! Direct peer-to-peer file transfer is fast, private, and serverless.");
+    setSnippetTitle("welcome-note.txt");
+  };
+
+  const applySampleDemoPreset = () => {
+    setRole("sender");
+    smRef.current.setRole("sender");
+    setSendMode("files");
+    const demo = createDemoImageFile();
+    setSelectedDiscoveredFiles([demo]);
   };
 
   const createSenderTransfer = async () => {
-    if (selectedFiles.length === 0) return;
+    let filesToSend: DiscoveredFile[] = [...selectedDiscoveredFiles];
+
+    if (sendMode === "text") {
+      if (!textSnippet.trim()) return;
+      const snippetFile = createTextSnippetFile(textSnippet, snippetTitle || "snippet.txt");
+      filesToSend = [snippetFile];
+    }
+
+    if (filesToSend.length === 0) return;
+
     try {
       smRef.current.setRole("sender");
       smRef.current.transition("offering");
@@ -213,13 +292,19 @@ export const App: React.FC = () => {
       const dc = await session.waitForConnection();
       smRef.current.transition("connected", { safetyCode: code });
 
-      // Start file transfer
-      const queuedFiles: QueuedFile[] = selectedFiles.map((file, idx) => ({
+      // Build queued files
+      let filesToSend: DiscoveredFile[] = selectedDiscoveredFiles;
+      if (sendMode === "text") {
+        filesToSend = [createTextSnippetFile(textSnippet, snippetTitle || "snippet.txt")];
+      }
+
+      const queuedFiles: QueuedFile[] = filesToSend.map((item, idx) => ({
         id: `file-${idx}-${Date.now()}`,
-        name: file.name,
-        size: file.size,
-        mime: file.type || "application/octet-stream",
-        source: file,
+        name: item.file.name,
+        relativePath: item.relativePath,
+        size: item.file.size,
+        mime: item.file.type || "application/octet-stream",
+        source: item.file,
       }));
 
       const sender = new FileSender(dc, queuedFiles);
@@ -249,9 +334,7 @@ export const App: React.FC = () => {
     }
   };
 
-  // --- Receiver Logic ---
-
-
+  // --- Receiver Handlers ---
   const handleManualOfferSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualOffer.trim()) return;
@@ -261,127 +344,318 @@ export const App: React.FC = () => {
     }
   };
 
-  // Drag and drop handlers
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
+  // Determine active stepper step index
+  let stepperIndex = 0;
+  if (role === "sender") {
+    if (status === "idle") stepperIndex = 0;
+    else if (status === "offering" || status === "awaiting-answer" || status === "connecting") stepperIndex = 1;
+    else if (status === "connected" || status === "transferring") stepperIndex = 2;
+    else if (status === "done") stepperIndex = 3;
+  } else if (role === "receiver") {
+    if (status === "idle") stepperIndex = 0;
+    else if (status === "connecting" || status === "awaiting-answer") stepperIndex = 1;
+    else if (status === "connected" || status === "transferring") stepperIndex = 2;
+    else if (status === "done") stepperIndex = 3;
+  }
 
-  const handleDragLeave = () => {
-    setIsDragging(false);
-  };
+  const effectiveSenderFiles = sendMode === "text"
+    ? (textSnippet.trim() ? [{ file: new File([textSnippet], snippetTitle || "snippet.txt"), relativePath: snippetTitle || "snippet.txt" }] : [])
+    : selectedDiscoveredFiles;
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      setSelectedFiles((prev) => [...prev, ...Array.from(e.dataTransfer.files)]);
-    }
-  };
+  const totalSelectedBytes = selectedDiscoveredFiles.reduce((acc, f) => acc + f.file.size, 0);
 
   return (
     <div className="app-container">
-      <header>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <span className="brand">qrtc</span>
+      {/* Top Bar / Header */}
+      <header className="site-header">
+        <div className="header-nav">
+          <div className="logo-group">
+            <span className="brand-logo">qrtc</span>
+            <span className="badge-tag">P2P v1.2</span>
+          </div>
           {role && (
-            <button type="button" className="brand" onClick={resetAll} style={{ textDecoration: "underline" }}>
-              Reset
+            <button
+              type="button"
+              className="btn-text-reset"
+              onClick={resetAll}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                <path d="M3 3v5h5" />
+              </svg>
+              Start over
             </button>
           )}
         </div>
-        <h1>Direct file transfer.</h1>
-        <p className="tagline">
-          Send a file between two devices directly. No server, no account — the handshake is a QR code.
-        </p>
+
+        {/* Polished Hero */}
+        <div className="hero-section">
+          <h1 className="hero-title">
+            Send files between your phone and computer. No app, no upload, no account.
+          </h1>
+          <p className="hero-subtitle">
+            Direct device-to-device streaming over WebRTC. The handshake is a QR code. Your data never touches a server.
+          </p>
+        </div>
+
+        {/* Stepper (when a role is active) */}
+        {role && (
+          <Stepper
+            steps={role === "sender" ? SENDER_STEPS : RECEIVER_STEPS}
+            currentStepIndex={stepperIndex}
+          />
+        )}
       </header>
 
       {/* Role Selection Screen */}
       {!role && status === "idle" && (
-        <main className="home-options">
-          <button
-            type="button"
-            className="role-button"
-            onClick={() => {
-              setRole("sender");
-              smRef.current.setRole("sender");
-            }}
-          >
-            <span className="role-title">Send</span>
-            <span className="role-desc">Select files and generate a handshake QR code for the receiver to scan.</span>
-          </button>
+        <main className="home-view">
+          <div className="role-grid">
+            <button
+              type="button"
+              className="role-button role-card-send"
+              onClick={() => {
+                setRole("sender");
+                smRef.current.setRole("sender");
+              }}
+            >
+              <div className="role-icon-box">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+              </div>
+              <div className="role-info">
+                <span className="role-title">Send</span>
+                <span className="role-desc">
+                  Pick files, folders, or snippets and show a QR code for your other device to scan.
+                </span>
+              </div>
+            </button>
 
-          <button
-            type="button"
-            className="role-button"
-            onClick={() => {
-              setRole("receiver");
-              smRef.current.setRole("receiver");
-            }}
-          >
-            <span className="role-title">Receive</span>
-            <span className="role-desc">Scan a sender's handshake QR code with your camera or paste a link.</span>
-          </button>
+            <button
+              type="button"
+              className="role-button role-card-receive"
+              onClick={() => {
+                setRole("receiver");
+                smRef.current.setRole("receiver");
+              }}
+            >
+              <div className="role-icon-box">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+              </div>
+              <div className="role-info">
+                <span className="role-title">Receive</span>
+                <span className="role-desc">
+                  Scan a QR code from the sending device or paste a handshake link.
+                </span>
+              </div>
+            </button>
+          </div>
+
+          {/* Friendly Presets */}
+          <div className="presets-bar">
+            <span className="presets-label">Quick test presets:</span>
+            <div className="presets-btns">
+              <button
+                type="button"
+                className="btn-preset"
+                onClick={applySampleNotePreset}
+              >
+                📝 Sample note
+              </button>
+              <button
+                type="button"
+                className="btn-preset"
+                onClick={applySampleDemoPreset}
+              >
+                🖼️ Demo vector art
+              </button>
+            </div>
+          </div>
+
+          {/* Technical Details Accordion */}
+          <details className="tech-details-accordion">
+            <summary className="tech-details-summary">
+              How does serverless zero-signaling work?
+            </summary>
+            <div className="tech-details-content">
+              <p>
+                Standard WebRTC requires a central signaling server to exchange session descriptions (SDPs).
+                <strong> qrtc</strong> compresses the full SDP into an ultra-compact binary payload using
+                RFC-compliant compact candidate encoding and <code>deflate-raw</code>.
+              </p>
+              <p>
+                By scanning each other's QR codes (or copying the short fallback link), devices establish a direct
+                peer-to-peer <code>RTCDataChannel</code> with end-to-end streaming SHA-256 integrity verification.
+              </p>
+            </div>
+          </details>
         </main>
       )}
 
-      {/* Sender Flow */}
+      {/* SENDER FLOW */}
       {role === "sender" && (
-        <main style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+        <main className="flow-main">
           {status === "idle" && (
             <div className="card">
-              <div>
-                <h2 style={{ fontSize: "18px", fontWeight: 600 }}>Choose files to send</h2>
-                <p className="tagline" style={{ marginTop: "4px" }}>
-                  Files are streamed directly over a peer-to-peer WebRTC DataChannel.
-                </p>
+              <div className="card-header">
+                <div>
+                  <h2 className="card-title">Choose what to send</h2>
+                  <p className="card-subtitle">
+                    Select multiple files, entire folders, or send a quick text snippet.
+                  </p>
+                </div>
+
+                {/* Mode Selector Tabs */}
+                <div className="tab-pill-group" role="tablist">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={sendMode === "files"}
+                    className={`tab-pill ${sendMode === "files" ? "active" : ""}`}
+                    onClick={() => setSendMode("files")}
+                  >
+                    Files & Folders
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={sendMode === "text"}
+                    className={`tab-pill ${sendMode === "text" ? "active" : ""}`}
+                    onClick={() => setSendMode("text")}
+                  >
+                    Text Snippet
+                  </button>
+                </div>
               </div>
 
-              <div
-                ref={dropzoneRef}
-                className={`dropzone ${isDragging ? "active" : ""}`}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                onClick={() => document.getElementById("file-input")?.click()}
-              >
-                <input
-                  id="file-input"
-                  type="file"
-                  multiple
-                  style={{ display: "none" }}
-                  onChange={handleFileSelect}
-                />
-                <span className="dropzone-title">Click to choose or drop files here</span>
-                <span className="dropzone-sub">Any file format, no server size limits</span>
-              </div>
+              {sendMode === "files" ? (
+                <>
+                  {/* Drag and Drop Zone */}
+                  <div
+                    className={`dropzone ${isDragging ? "active" : ""}`}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                  >
+                    <div className="dropzone-icon">
+                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
+                        <path d="M12 12v9" />
+                        <path d="m16 16-4-4-4 4" />
+                      </svg>
+                    </div>
+                    <span className="dropzone-title">Drag & drop files or folders here</span>
+                    <span className="dropzone-sub">
+                      Folder structures and relative paths are preserved
+                    </span>
 
-              {selectedFiles.length > 0 && (
-                <div className="file-list">
-                  {selectedFiles.map((file, idx) => (
-                    <div key={`${file.name}-${idx}`} className="file-item">
-                      <span className="file-name">{file.name}</span>
-                      <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-                        <span className="file-size">{formatBytes(file.size)}</span>
-                        <button
-                          type="button"
-                          onClick={() => removeFile(idx)}
-                          className="brand"
-                          style={{ color: "var(--muted)" }}
-                        >
-                          Remove
-                        </button>
+                    <div className="dropzone-action-buttons">
+                      <button
+                        type="button"
+                        className="btn-secondary btn-sm"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        Choose files
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-secondary btn-sm"
+                        onClick={() => folderInputRef.current?.click()}
+                      >
+                        Choose folder
+                      </button>
+                    </div>
+
+                    {/* Hidden inputs */}
+                    <input
+                      ref={fileInputRef}
+                      id="file-input"
+                      type="file"
+                      multiple
+                      style={{ display: "none" }}
+                      onChange={handleFileInputChange}
+                    />
+                    <input
+                      ref={folderInputRef}
+                      id="folder-input"
+                      type="file"
+                      // @ts-expect-error webkitdirectory is standard for folder picking
+                      webkitdirectory=""
+                      multiple
+                      style={{ display: "none" }}
+                      onChange={handleFolderInputChange}
+                    />
+                  </div>
+
+                  {/* Selected Files List */}
+                  {selectedDiscoveredFiles.length > 0 && (
+                    <div className="selected-files-box">
+                      <div className="selected-files-summary">
+                        <span>
+                          {selectedDiscoveredFiles.length} item{selectedDiscoveredFiles.length > 1 ? "s" : ""} selected
+                        </span>
+                        <span className="meta-dim">({formatBytes(totalSelectedBytes)})</span>
+                      </div>
+
+                      <div className="file-list">
+                        {selectedDiscoveredFiles.map((item, idx) => (
+                          <div key={`${item.relativePath}-${idx}`} className="file-item">
+                            <div className="file-item-info">
+                              <span className="file-name" title={item.relativePath}>
+                                {item.relativePath}
+                              </span>
+                              <span className="file-size">{formatBytes(item.file.size)}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => removeFile(idx)}
+                              className="btn-item-remove"
+                              aria-label="Remove item"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  ))}
+                  )}
+                </>
+              ) : (
+                /* Text Snippet Input */
+                <div className="snippet-input-group">
+                  <input
+                    type="text"
+                    className="input-text-title"
+                    placeholder="Snippet title (e.g. Wi-Fi Password, Link, Note)"
+                    value={snippetTitle}
+                    onChange={(e) => setSnippetTitle(e.target.value)}
+                  />
+                  <textarea
+                    className="code-area"
+                    rows={6}
+                    placeholder="Paste or type text, link, code snippet, or credentials to send..."
+                    value={textSnippet}
+                    onChange={(e) => setTextSnippet(e.target.value)}
+                  />
+                  <span className="dropzone-sub">
+                    The receiving device will be able to copy this snippet to their clipboard with one click.
+                  </span>
                 </div>
               )}
 
+              {/* Action Buttons */}
               <div className="btn-row">
                 <button
                   type="button"
                   className="btn-primary"
-                  disabled={selectedFiles.length === 0}
+                  disabled={effectiveSenderFiles.length === 0}
                   onClick={createSenderTransfer}
                 >
                   Create transfer
@@ -394,26 +668,35 @@ export const App: React.FC = () => {
           )}
 
           {status === "offering" && (
-            <div className="card">
-              <span className="brand">Preparing transfer</span>
-              <p className="tagline">Gathering network candidates and generating offer...</p>
+            <div className="card loading-card">
+              <div className="loading-spinner" />
+              <div>
+                <h3 className="card-title">Preparing direct transfer</h3>
+                <p className="card-subtitle">
+                  Gathering local network candidates and generating compressed handshake...
+                </p>
+              </div>
             </div>
           )}
 
           {status === "awaiting-answer" && (
             <>
               <QrCard
-                title="1. Scan with receiver"
-                subtitle="Open this camera QR code on the receiving phone or laptop"
+                title="1. Scan with receiving device"
+                subtitle="Open your phone camera or qrtc on your other device to scan this code"
                 payload={offerCompressed}
                 url={offerUrl}
+                stepBadge="Step 1 of 2"
               />
 
               <div className="card">
                 <div>
-                  <h3 style={{ fontSize: "16px", fontWeight: 600 }}>2. Complete the handshake</h3>
-                  <p className="tagline" style={{ marginTop: "4px" }}>
-                    Once the receiver scans this QR, it will show an answer code.
+                  <span className="step-pill">Step 2 of 2</span>
+                  <h3 className="card-title" style={{ marginTop: "6px" }}>
+                    Complete the handshake
+                  </h3>
+                  <p className="card-subtitle">
+                    Once the receiver scans Step 1, it will display a matching answer code.
                   </p>
                 </div>
 
@@ -423,12 +706,17 @@ export const App: React.FC = () => {
                     className="btn-primary"
                     onClick={() => setShowAnswerScanner(true)}
                   >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: "inline-block", marginRight: "6px" }}>
+                      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                      <circle cx="12" cy="13" r="4" />
+                    </svg>
                     Scan receiver answer QR
                   </button>
                 </div>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "12px" }}>
-                  <label className="brand" htmlFor="answer-code-input">
+                {/* Short Paste-Code Fallback */}
+                <div className="paste-fallback-box">
+                  <label className="field-label" htmlFor="answer-code-input">
                     Or paste receiver answer code
                   </label>
                   <textarea
@@ -452,9 +740,14 @@ export const App: React.FC = () => {
           )}
 
           {status === "connecting" && (
-            <div className="card">
-              <span className="brand">Connecting</span>
-              <p className="tagline">Performing WebRTC connectivity checks directly between devices...</p>
+            <div className="card loading-card">
+              <div className="loading-spinner" />
+              <div>
+                <h3 className="card-title">Connecting to peer</h3>
+                <p className="card-subtitle">
+                  Performing direct WebRTC connectivity checks...
+                </p>
+              </div>
             </div>
           )}
 
@@ -463,11 +756,12 @@ export const App: React.FC = () => {
               role="sender"
               safetyCode={safetyCode}
               progress={progress}
-              completedFiles={selectedFiles.map((f, i) => ({
+              completedFiles={effectiveSenderFiles.map((item, i) => ({
                 id: String(i),
-                name: f.name,
-                size: f.size,
-                mime: f.type,
+                name: item.file.name,
+                relativePath: item.relativePath,
+                size: item.file.size,
+                mime: item.file.type,
                 sha256: "",
               }))}
               isDone={status === "done"}
@@ -484,15 +778,15 @@ export const App: React.FC = () => {
         </main>
       )}
 
-      {/* Receiver Flow */}
+      {/* RECEIVER FLOW */}
       {role === "receiver" && (
-        <main style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+        <main className="flow-main">
           {status === "idle" && (
             <div className="card">
               <div>
-                <h2 style={{ fontSize: "18px", fontWeight: 600 }}>Receive a file</h2>
-                <p className="tagline" style={{ marginTop: "4px" }}>
-                  Scan the sender's offer QR code to establish a direct connection.
+                <h2 className="card-title">Receive from another device</h2>
+                <p className="card-subtitle">
+                  Scan the sender's offer QR code or paste their handshake code.
                 </p>
               </div>
 
@@ -502,18 +796,23 @@ export const App: React.FC = () => {
                   className="btn-primary"
                   onClick={() => setShowOfferScanner(true)}
                 >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: "inline-block", marginRight: "6px" }}>
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                    <circle cx="12" cy="13" r="4" />
+                  </svg>
                   Scan sender QR code
                 </button>
               </div>
 
-              <form onSubmit={handleManualOfferSubmit} style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "12px" }}>
-                <label className="brand" htmlFor="offer-code-input">
+              {/* Paste offer fallback */}
+              <form onSubmit={handleManualOfferSubmit} className="paste-fallback-box">
+                <label className="field-label" htmlFor="offer-code-input">
                   Or paste offer code or link
                 </label>
                 <textarea
                   id="offer-code-input"
                   className="code-area"
-                  placeholder="https://gfxroy.github.io/qrtc/#o=... or raw code"
+                  placeholder="https://...#o=... or raw handshake code"
                   value={manualOffer}
                   onChange={(e) => setManualOffer(e.target.value)}
                 />
@@ -529,9 +828,14 @@ export const App: React.FC = () => {
           )}
 
           {status === "connecting" && !answerCompressed && (
-            <div className="card">
-              <span className="brand">Connecting</span>
-              <p className="tagline">Generating answer and preparing peer connection...</p>
+            <div className="card loading-card">
+              <div className="loading-spinner" />
+              <div>
+                <h3 className="card-title">Preparing connection</h3>
+                <p className="card-subtitle">
+                  Generating answer and setting up local peer connection...
+                </p>
+              </div>
             </div>
           )}
 
@@ -539,14 +843,18 @@ export const App: React.FC = () => {
             <>
               <QrCard
                 title="Show this answer to sender"
-                subtitle="Have the sender scan this QR code or copy the code below"
+                subtitle="Have the sender scan this QR code or copy the raw code below"
                 payload={answerCompressed}
+                stepBadge="Step 2 of 2"
               />
-              <div className="card">
-                <span className="brand">Waiting for sender</span>
-                <p className="tagline">
-                  Once the sender scans or pastes this answer, the data channel will connect automatically.
-                </p>
+              <div className="card loading-card">
+                <div className="loading-spinner" />
+                <div>
+                  <h3 className="card-title">Waiting for sender</h3>
+                  <p className="card-subtitle">
+                    Once the sender applies this answer, the data channel opens automatically.
+                  </p>
+                </div>
               </div>
             </>
           )}
@@ -574,10 +882,17 @@ export const App: React.FC = () => {
       {/* Error View */}
       {status === "failed" && error && (
         <div className="card error-card">
-          <div>
+          <div className="error-header">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
             <h2 className="error-title">{error.message}</h2>
-            {error.details && <p className="error-details" style={{ marginTop: "6px" }}>{error.details}</p>}
           </div>
+          {error.details && <p className="error-details">{error.details}</p>}
+
+          <HelpPanel initiallyOpen={true} />
 
           <div className="btn-row">
             <button type="button" className="btn-primary" onClick={resetAll}>
@@ -610,11 +925,21 @@ export const App: React.FC = () => {
         />
       )}
 
-      <footer>
-        <span>No server · No accounts · Peer-to-peer</span>
-        <a href="https://github.com/gfxroy/qrtc" target="_blank" rel="noopener noreferrer">
-          GitHub
-        </a>
+      {/* Help Panel (Always visible at bottom when not in error) */}
+      {status !== "failed" && <HelpPanel />}
+
+      {/* Footer */}
+      <footer className="site-footer">
+        <div className="footer-left">
+          <span>qrtc · Peer-to-peer WebRTC</span>
+          <span className="footer-dot">·</span>
+          <span>No servers, no tracking</span>
+        </div>
+        <div className="footer-right">
+          <a href="https://github.com/gfxroy/qrtc" target="_blank" rel="noopener noreferrer">
+            GitHub
+          </a>
+        </div>
       </footer>
     </div>
   );
