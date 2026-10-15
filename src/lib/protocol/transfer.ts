@@ -29,6 +29,7 @@ export interface QueuedFile {
   size: number;
   mime: string;
   source: BinaryDataSource;
+  relativePath?: string;
 }
 
 export interface TransferProgress {
@@ -53,6 +54,7 @@ export interface ReceivedFile {
   sha256: string;
   blob?: Blob;
   data?: Uint8Array;
+  relativePath?: string;
 }
 
 const BACKPRESSURE_THRESHOLD = 256 * 1024; // 256 KB
@@ -136,6 +138,7 @@ export class FileSender {
           name: f.name,
           size: f.size,
           mime: f.mime,
+          relativePath: f.relativePath,
         })),
       };
       this.channel.send(serializeMessage(manifest));
@@ -168,6 +171,7 @@ export class FileSender {
       mime: file.mime,
       chunkSize: DEFAULT_CHUNK_SIZE,
       totalChunks,
+      relativePath: file.relativePath,
     };
     this.channel.send(serializeMessage(startMsg));
 
@@ -408,6 +412,7 @@ export class FileReceiver {
         size: this.currentFile.size,
         mime: this.currentFile.mime,
         sha256: computedSha,
+        relativePath: this.currentFile.relativePath,
       };
     } else {
       // Reconstruct buffer / blob
@@ -432,6 +437,7 @@ export class FileReceiver {
         size: this.currentFile.size,
         mime: this.currentFile.mime,
         sha256: computedSha,
+        relativePath: this.currentFile.relativePath,
         blob,
         data,
       };

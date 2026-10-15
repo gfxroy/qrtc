@@ -151,4 +151,31 @@ describe("Transfer Protocol", () => {
     expect(receivedFiles).toEqual(["tiny.txt", "medium.dat", "empty.bin"]);
     expect(receiverAllDone).toBe(true);
   });
+
+  it("preserves relativePath across folder structure transfer", async () => {
+    const [senderCh, receiverCh] = createMockPair();
+    const data = new Uint8Array([10, 20, 30]);
+
+    const files: QueuedFile[] = [
+      {
+        id: "f-nested",
+        name: "document.pdf",
+        relativePath: "projects/docs/document.pdf",
+        size: data.length,
+        mime: "application/pdf",
+        source: data,
+      },
+    ];
+
+    const sender = new FileSender(senderCh, files);
+    const receiver = new FileReceiver(receiverCh);
+
+    const received: string[] = [];
+    receiver.onFileReceived = (rf) => {
+      received.push(rf.relativePath || rf.name);
+    };
+
+    await sender.start();
+    expect(received).toEqual(["projects/docs/document.pdf"]);
+  });
 });

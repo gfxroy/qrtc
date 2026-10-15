@@ -3,6 +3,7 @@ export interface ManifestItem {
   name: string;
   size: number;
   mime: string;
+  relativePath?: string;
 }
 
 export interface FileManifestMessage {
@@ -18,6 +19,7 @@ export interface FileStartMessage {
   mime: string;
   chunkSize: number;
   totalChunks: number;
+  relativePath?: string;
 }
 
 export interface FileEndMessage {
