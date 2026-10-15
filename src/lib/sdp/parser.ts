@@ -1,6 +1,6 @@
 import type { CompactCandidate, CompactSdp, SdpType, SetupRole, CandidateType, TransportProtocol, AddressType } from "./types.ts";
 
-function detectAddressType(addr: string): AddressType {
+export function detectAddressType(addr: string): AddressType {
   // IPv4: 4 decimal numbers separated by dots
   if (/^(\d{1,3}\.){3}\d{1,3}$/.test(addr)) {
     return 4;
@@ -9,7 +9,14 @@ function detectAddressType(addr: string): AddressType {
   if (addr.includes(":")) {
     return 6;
   }
-  // Otherwise domain / mDNS name
+  // mDNS UUID: standard UUID (32 hex digits, with or without hyphens) ending with .local
+  if (
+    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.local$/i.test(addr) ||
+    /^[0-9a-fA-F]{32}\.local$/i.test(addr)
+  ) {
+    return "mdns";
+  }
+  // Otherwise generic domain
   return "domain";
 }
 
@@ -48,7 +55,7 @@ export function parseSdp(sdp: string, defaultType: SdpType = "offer"): CompactSd
       const port = parseInt(parts[0], 10);
       if (!isNaN(port) && port > 0) sctpPort = port;
     } else if (line.startsWith("a=candidate:")) {
-      // RFC 5245: a=candidate:<foundation> <component> <transport> <priority> <connection-address> <port> typ <candidate-types> ...
+      // RFC 5245 / RFC 6544: a=candidate:<foundation> <component> <transport> <priority> <connection-address> <port> typ <candidate-types> ...
       const body = line.substring("a=candidate:".length).trim();
       const tokens = body.split(/\s+/);
       if (tokens.length >= 8) {
@@ -61,13 +68,16 @@ export function parseSdp(sdp: string, defaultType: SdpType = "offer"): CompactSd
         if (typIndex === -1 || typIndex + 1 >= tokens.length) continue;
         const typ = tokens[typIndex + 1].toLowerCase();
 
-        if ((typ === "host" || typ === "srflx") && !isNaN(port) && port > 0) {
+        if (!isNaN(port) && port > 0) {
+          const normType: CandidateType = typ === "host" ? "host" : "srflx";
+          const addrType = detectAddressType(ip);
+          const normalizedIp = addrType === "mdns" ? ip.toLowerCase() : ip;
           candidates.push({
-            type: typ as CandidateType,
+            type: normType,
             protocol: transport as TransportProtocol,
-            ip,
+            ip: normalizedIp,
             port,
-            addressType: detectAddressType(ip),
+            addressType: addrType,
           });
         }
       }
@@ -78,11 +88,22 @@ export function parseSdp(sdp: string, defaultType: SdpType = "offer"): CompactSd
   const seen = new Set<string>();
   const uniqueCandidates: CompactCandidate[] = [];
   for (const c of candidates) {
-    const key = `${c.protocol}:${c.ip}:${c.port}:${c.type}`;
+    const key = `${c.protocol}:${c.ip.toLowerCase()}:${c.port}:${c.type}`;
     if (!seen.has(key)) {
       seen.add(key);
       uniqueCandidates.push(c);
     }
+  }
+
+  // Ensure at least one usable candidate is kept
+  if (uniqueCandidates.length === 0) {
+    uniqueCandidates.push({
+      type: "host",
+      protocol: "udp",
+      ip: "127.0.0.1",
+      port: 9,
+      addressType: 4,
+    });
   }
 
   const type: SdpType = setup === "actpass" ? "offer" : defaultType;

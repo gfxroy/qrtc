@@ -57,11 +57,26 @@ export class SenderSession {
   }
 
   public async createOffer(): Promise<string> {
+    const gatheredCandidates: string[] = [];
+    const onCand = (e: RTCPeerConnectionIceEvent) => {
+      if (e.candidate && e.candidate.candidate) {
+        gatheredCandidates.push(e.candidate.candidate);
+      }
+    };
+    this.pc.addEventListener("icecandidate", onCand);
+
     const offer = await this.pc.createOffer();
     await this.pc.setLocalDescription(offer);
     await waitForIceGathering(this.pc, this.iceTimeoutMs);
+    this.pc.removeEventListener("icecandidate", onCand);
 
-    const fullSdp = this.pc.localDescription?.sdp || "";
+    let fullSdp = this.pc.localDescription?.sdp || "";
+    for (const c of gatheredCandidates) {
+      if (!fullSdp.includes(c)) {
+        fullSdp += `a=${c}\r\n`;
+      }
+    }
+
     const parsed = parseSdp(fullSdp, "offer");
     this.localFingerprint = parsed.fingerprint;
 
@@ -157,11 +172,26 @@ export class ReceiverSession {
       sdp: expandedOffer,
     });
 
+    const gatheredCandidates: string[] = [];
+    const onCand = (e: RTCPeerConnectionIceEvent) => {
+      if (e.candidate && e.candidate.candidate) {
+        gatheredCandidates.push(e.candidate.candidate);
+      }
+    };
+    this.pc.addEventListener("icecandidate", onCand);
+
     const answer = await this.pc.createAnswer();
     await this.pc.setLocalDescription(answer);
     await waitForIceGathering(this.pc, this.iceTimeoutMs);
+    this.pc.removeEventListener("icecandidate", onCand);
 
-    const fullSdp = this.pc.localDescription?.sdp || "";
+    let fullSdp = this.pc.localDescription?.sdp || "";
+    for (const c of gatheredCandidates) {
+      if (!fullSdp.includes(c)) {
+        fullSdp += `a=${c}\r\n`;
+      }
+    }
+
     const parsedAnswer = parseSdp(fullSdp, "answer");
     this.localFingerprint = parsedAnswer.fingerprint;
 

@@ -32,11 +32,13 @@ export function buildSdp(compact: CompactSdp, sessionId: string = "1234567890123
     const proto = c.protocol.toLowerCase();
     const priority = c.type === "host" ? 2122260223 - i * 65536 : 1686052607 - i * 65536;
 
+    const tcpExtra = proto === "tcp" ? " tcptype passive" : "";
+
     if (c.type === "host") {
-      lines.push(`a=candidate:${foundation} 1 ${proto} ${priority} ${c.ip} ${c.port} typ host`);
+      lines.push(`a=candidate:${foundation} 1 ${proto} ${priority} ${c.ip} ${c.port} typ host${tcpExtra}`);
     } else {
       lines.push(
-        `a=candidate:${foundation} 1 ${proto} ${priority} ${c.ip} ${c.port} typ srflx raddr 0.0.0.0 rport 0`
+        `a=candidate:${foundation} 1 ${proto} ${priority} ${c.ip} ${c.port} typ srflx raddr 0.0.0.0 rport 0${tcpExtra}`
       );
     }
   }

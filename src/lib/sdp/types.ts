@@ -2,7 +2,7 @@ export type SdpType = "offer" | "answer";
 export type SetupRole = "actpass" | "active" | "passive";
 export type CandidateType = "host" | "srflx";
 export type TransportProtocol = "udp" | "tcp";
-export type AddressType = 4 | 6 | "domain";
+export type AddressType = 4 | 6 | "mdns" | "domain";
 
 export interface CompactCandidate {
   type: CandidateType;

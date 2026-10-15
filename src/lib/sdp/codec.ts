@@ -1,5 +1,5 @@
 import { deflateSync, inflateSync } from "fflate";
-import type { CompactCandidate, CompactSdp, SdpType, SetupRole, CandidateType, TransportProtocol } from "./types.ts";
+import type { CompactCandidate, CompactSdp, SdpType, SetupRole, CandidateType, TransportProtocol, AddressType } from "./types.ts";
 import { parseSdp } from "./parser.ts";
 import { buildSdp } from "./builder.ts";
 
@@ -101,6 +101,7 @@ export function encodeCompactSdp(sdp: CompactSdp): Uint8Array {
     candSize += 3; // flag + 2 port
     if (c.addressType === 4) candSize += 4;
     else if (c.addressType === 6) candSize += 16;
+    else if (c.addressType === "mdns") candSize += 16;
     else candSize += 1 + textEncoder.encode(c.ip).length;
   }
 
@@ -139,7 +140,7 @@ export function encodeCompactSdp(sdp: CompactSdp): Uint8Array {
   for (const c of sdp.candidates) {
     const typeBit = c.type === "host" ? 0 : 1;
     const protoBit = c.protocol === "udp" ? 0 : 1;
-    const addrTypeBits = c.addressType === 4 ? 0 : c.addressType === 6 ? 1 : 2;
+    const addrTypeBits = c.addressType === 4 ? 0 : c.addressType === 6 ? 1 : c.addressType === "mdns" ? 2 : 3;
 
     buf[offset++] = (addrTypeBits << 2) | (protoBit << 1) | typeBit;
     view.setUint16(offset, c.port, false);
@@ -150,6 +151,10 @@ export function encodeCompactSdp(sdp: CompactSdp): Uint8Array {
       offset += 4;
     } else if (c.addressType === 6) {
       buf.set(ipv6ToBytes(c.ip), offset);
+      offset += 16;
+    } else if (c.addressType === "mdns") {
+      const cleanHex = c.ip.replace(/\.local$/i, "").replace(/-/g, "");
+      buf.set(hexToBytes(cleanHex), offset);
       offset += 16;
     } else {
       const domainBytes = textEncoder.encode(c.ip);
@@ -204,20 +209,27 @@ export function decodeCompactSdp(buf: Uint8Array): CompactSdp {
     offset += 2;
 
     let ip: string;
+    let addressType: AddressType;
     if (addrTypeBits === 0) {
       ip = bytesToIpv4(buf, offset);
       offset += 4;
-      candidates.push({ type: cType, protocol: proto, ip, port, addressType: 4 });
+      addressType = 4;
     } else if (addrTypeBits === 1) {
       ip = bytesToIpv6(buf, offset);
       offset += 16;
-      candidates.push({ type: cType, protocol: proto, ip, port, addressType: 6 });
+      addressType = 6;
+    } else if (addrTypeBits === 2) {
+      const hex = bytesToHex(buf.subarray(offset, offset + 16)).toLowerCase();
+      offset += 16;
+      ip = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}.local`;
+      addressType = "mdns";
     } else {
       const dLen = buf[offset++];
       ip = textDecoder.decode(buf.subarray(offset, offset + dLen));
       offset += dLen;
-      candidates.push({ type: cType, protocol: proto, ip, port, addressType: "domain" });
+      addressType = "domain";
     }
+    candidates.push({ type: cType, protocol: proto, ip, port, addressType });
   }
 
   return {
