@@ -6,6 +6,7 @@ interface QrCardProps {
   subtitle?: string;
   payload: string;
   url?: string;
+  stepBadge?: string;
 }
 
 export const QrCard: React.FC<QrCardProps> = ({
@@ -13,10 +14,12 @@ export const QrCard: React.FC<QrCardProps> = ({
   subtitle,
   payload,
   url,
+  stepBadge,
 }) => {
   const [svgHtml, setSvgHtml] = useState<string>("");
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [showCodeDetails, setShowCodeDetails] = useState(false);
 
   useEffect(() => {
     // Generate QR code for the URL if available, else for the raw payload
@@ -59,20 +62,27 @@ export const QrCard: React.FC<QrCardProps> = ({
   };
 
   return (
-    <div className="card" style={{ alignItems: "center", textAlign: "center" }}>
-      <div>
-        <h2 style={{ fontSize: "18px", fontWeight: 600 }}>{title}</h2>
-        {subtitle && <p className="tagline" style={{ marginTop: "4px" }}>{subtitle}</p>}
+    <div className="card qr-card-animated">
+      <div className="qr-header">
+        {stepBadge && <span className="step-pill">{stepBadge}</span>}
+        <h2 className="card-title">{title}</h2>
+        {subtitle && <p className="card-subtitle">{subtitle}</p>}
       </div>
 
-      <div className="qr-wrapper">
-        <div
-          className="qr-box"
-          dangerouslySetInnerHTML={{ __html: svgHtml }}
-        />
+      <div className="qr-display-container">
+        <div className="qr-pulse-wrapper">
+          <div
+            className="qr-box-animated"
+            dangerouslySetInnerHTML={{ __html: svgHtml }}
+          />
+          <div className="qr-pulse-ring" />
+        </div>
+        <span className="qr-waiting-text">
+          <span className="waiting-dot" /> Waiting for peer to scan...
+        </span>
       </div>
 
-      <div className="btn-row" style={{ justifyContent: "center" }}>
+      <div className="btn-row qr-btn-row">
         {url && (
           <button
             type="button"
@@ -89,6 +99,26 @@ export const QrCard: React.FC<QrCardProps> = ({
         >
           {copiedCode ? "Code copied" : "Copy raw code"}
         </button>
+      </div>
+
+      <div className="qr-details-toggle">
+        <button
+          type="button"
+          className="btn-text-subtle"
+          onClick={() => setShowCodeDetails((prev) => !prev)}
+        >
+          {showCodeDetails ? "Hide raw code" : "Show raw code"}
+        </button>
+        {showCodeDetails && (
+          <div className="qr-code-inspect">
+            <textarea
+              readOnly
+              className="code-area-readonly"
+              value={payload}
+              rows={3}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

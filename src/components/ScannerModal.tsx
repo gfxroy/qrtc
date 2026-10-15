@@ -45,58 +45,64 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
   return (
     <div className="scanner-overlay" role="dialog" aria-modal="true">
       <div className="scanner-header">
-        <span className="brand">{promptText}</span>
-        <button type="button" className="btn-secondary" onClick={onClose} style={{ height: "32px", padding: "0 12px" }}>
-          Close
+        <span className="scanner-title">{promptText}</span>
+        <button
+          type="button"
+          className="btn-scanner-close"
+          onClick={onClose}
+          aria-label="Close scanner"
+        >
+          ✕
         </button>
       </div>
 
       {!showManual ? (
-        <>
+        <div className="scanner-center">
           <div className="scanner-video-container">
             <video ref={videoRef} autoPlay playsInline muted />
-            <div className="scanner-target" />
+
+            {/* Frame overlay with corner brackets and animated scanning line */}
+            <div className="scanner-frame-overlay">
+              <span className="scanner-bracket corner-tl" />
+              <span className="scanner-bracket corner-tr" />
+              <span className="scanner-bracket corner-bl" />
+              <span className="scanner-bracket corner-br" />
+              <div className="scanner-scanning-line" />
+            </div>
           </div>
 
-          {errorMsg ? (
-            <p className="tagline" style={{ textAlign: "center", color: "#a1a1a1", maxWidth: "340px" }}>
-              {errorMsg}
-            </p>
-          ) : (
-            <p className="tagline" style={{ textAlign: "center", color: "#a1a1a1" }}>
-              Hold device steady over QR code
-            </p>
-          )}
+          <p className="scanner-hint">
+            {errorMsg ? errorMsg : "Align the QR code within the frame to connect automatically"}
+          </p>
 
           <button
             type="button"
-            className="btn-secondary"
+            className="btn-secondary scanner-manual-btn"
             onClick={() => setShowManual(true)}
-            style={{ width: "100%", maxWidth: "360px" }}
           >
-            Paste code manually
+            Paste code instead
           </button>
-        </>
+        </div>
       ) : (
-        <form onSubmit={handleManualSubmit} style={{ width: "100%", maxWidth: "360px", display: "flex", flexDirection: "column", gap: "16px" }}>
-          <label className="brand" htmlFor="manual-code-input">
-            Paste connection code or URL
+        <form onSubmit={handleManualSubmit} className="scanner-manual-form">
+          <label className="scanner-manual-label" htmlFor="manual-code-input">
+            Paste connection code or link
           </label>
           <textarea
             id="manual-code-input"
             className="code-area"
             rows={5}
-            placeholder="Paste code or URL here..."
+            placeholder="Paste raw handshake code or https://... link here"
             value={manualText}
             onChange={(e) => setManualText(e.target.value)}
             autoFocus
           />
           <div className="btn-row">
             <button type="submit" className="btn-primary" disabled={!manualText.trim()}>
-              Submit code
+              Connect
             </button>
             <button type="button" className="btn-secondary" onClick={() => setShowManual(false)}>
-              Use camera
+              Back to camera
             </button>
           </div>
         </form>
