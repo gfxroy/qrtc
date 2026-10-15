@@ -46,7 +46,7 @@ export const ProgressRing: React.FC<ProgressRingProps> = ({
             strokeWidth={strokeWidth}
             strokeDasharray={circumference}
             strokeDashoffset={strokeDashoffset}
-            strokeLinecap="round"
+            strokeLinecap={percent >= 100 ? "butt" : "round"}
             fill="transparent"
             r={radius}
             cx={size / 2}

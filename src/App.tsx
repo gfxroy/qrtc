@@ -471,7 +471,13 @@ export const App: React.FC = () => {
         {role && (
           <Stepper
             steps={role === "sender" ? SENDER_STEPS : RECEIVER_STEPS}
-            currentStepIndex={status === "failed" ? stableStep : stepperIndex}
+            currentStepIndex={
+              status === "done"
+                ? (role === "sender" ? SENDER_STEPS.length : RECEIVER_STEPS.length)
+                : status === "failed"
+                  ? stableStep
+                  : stepperIndex
+            }
           />
         )}
       </header>
