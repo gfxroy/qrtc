@@ -42,7 +42,7 @@ export const ProgressRing: React.FC<ProgressRingProps> = ({
           {/* Progress Stroke */}
           <circle
             className={`progress-ring-circle ${isDone ? "done" : ""}`}
-            stroke={isDone ? "#10b981" : "var(--fg)"}
+            stroke={isDone ? "var(--accent)" : "var(--fg)"}
             strokeWidth={strokeWidth}
             strokeDasharray={circumference}
             strokeDashoffset={strokeDashoffset}
@@ -55,9 +55,9 @@ export const ProgressRing: React.FC<ProgressRingProps> = ({
         </svg>
 
         <div className="progress-ring-center">
-          <span className="progress-ring-percent">
+          <span className={`progress-ring-percent ${isDone ? "done" : ""}`}>
             {isDone ? (
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
             ) : (
@@ -80,8 +80,8 @@ export const ProgressRing: React.FC<ProgressRingProps> = ({
 
         {!isDone && (
           <div className="meta-stat">
-            <span className="meta-label">Est. Time Remaining</span>
-            <span className="meta-value">{formatEta(eta)}</span>
+            <span className="meta-label">Time left</span>
+            <span className="meta-value">{speed > 0 ? formatEta(eta) : "Calculating…"}</span>
           </div>
         )}
 

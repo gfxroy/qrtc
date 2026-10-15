@@ -93,7 +93,7 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ file }) => {
               onClick={handleCopyText}
               title="Copy snippet to clipboard"
             >
-              {copied ? "Copied" : "Copy text"}
+              {copied ? "Copied" : "Copy"}
             </button>
           )}
 
@@ -116,7 +116,7 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ file }) => {
       </div>
 
       {/* Media Previews */}
-      {objectUrl && (
+      {objectUrl && (isImage || isVideo || isAudio || textSnippet !== null) && (
         <div className="file-preview-body">
           {isImage && (
             <div className="preview-image-wrap" onClick={() => setLightboxOpen(true)}>

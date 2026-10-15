@@ -13,17 +13,17 @@ import { Stepper, type StepItem } from "./components/Stepper.tsx";
 import { HelpPanel } from "./components/HelpPanel.tsx";
 
 const SENDER_STEPS: StepItem[] = [
-  { id: "select", label: "Select", sublabel: "Files or text" },
-  { id: "pair", label: "Pair", sublabel: "QR handshake" },
-  { id: "transfer", label: "Transfer", sublabel: "Direct stream" },
-  { id: "done", label: "Done", sublabel: "Verified" },
+  { id: "select", label: "Choose", sublabel: "Files or text" },
+  { id: "pair", label: "Pair", sublabel: "Scan the code" },
+  { id: "transfer", label: "Send", sublabel: "On its way" },
+  { id: "done", label: "Done", sublabel: "Checked" },
 ];
 
 const RECEIVER_STEPS: StepItem[] = [
-  { id: "scan", label: "Connect", sublabel: "Scan sender" },
-  { id: "pair", label: "Answer", sublabel: "Complete pair" },
-  { id: "transfer", label: "Transfer", sublabel: "Direct stream" },
-  { id: "done", label: "Done", sublabel: "Verified" },
+  { id: "scan", label: "Connect", sublabel: "Scan the code" },
+  { id: "pair", label: "Answer", sublabel: "Show your code" },
+  { id: "transfer", label: "Receive", sublabel: "On its way" },
+  { id: "done", label: "Done", sublabel: "Checked" },
 ];
 
 export const App: React.FC = () => {
@@ -52,6 +52,7 @@ export const App: React.FC = () => {
   const [safetyCode, setSafetyCode] = useState<string>("");
   const [progress, setProgress] = useState<TransferProgress | null>(null);
   const [receivedFiles, setReceivedFiles] = useState<ReceivedFile[]>([]);
+  const [verifiedSent, setVerifiedSent] = useState<ReceivedFile[]>([]);
 
   // Refs for active sessions
   const smRef = useRef<ConnectionStateMachine>(new ConnectionStateMachine());
@@ -61,7 +62,10 @@ export const App: React.FC = () => {
   const fileReceiverRef = useRef<FileReceiver | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
+  const dragDepthRef = useRef(0);
+  const [stableStep, setStableStep] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
+  const [previewUrls, setPreviewUrls] = useState<string[]>([]);
 
   // Subscribe to state machine transitions
   useEffect(() => {
@@ -114,6 +118,7 @@ export const App: React.FC = () => {
           document.body.appendChild(a);
           a.click();
           document.body.removeChild(a);
+          window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 4000);
         }
       };
 
@@ -182,6 +187,10 @@ export const App: React.FC = () => {
     setSafetyCode("");
     setProgress(null);
     setReceivedFiles([]);
+    setVerifiedSent([]);
+    setPreviewUrls([]);
+    setStableStep(0);
+    dragDepthRef.current = 0;
 
     if (window.location.hash) {
       history.replaceState(null, "", window.location.pathname);
@@ -194,6 +203,7 @@ export const App: React.FC = () => {
       const discovered = extractFilesFromInput(e.target.files);
       setSelectedDiscoveredFiles((prev) => [...prev, ...discovered]);
     }
+    e.target.value = "";
   };
 
   const handleFolderInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -201,6 +211,7 @@ export const App: React.FC = () => {
       const discovered = extractFilesFromInput(e.target.files);
       setSelectedDiscoveredFiles((prev) => [...prev, ...discovered]);
     }
+    e.target.value = "";
   };
 
   const removeFile = (index: number) => {
@@ -209,21 +220,42 @@ export const App: React.FC = () => {
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  };
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragDepthRef.current += 1;
     setIsDragging(true);
   };
 
-  const handleDragLeave = () => {
-    setIsDragging(false);
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setIsDragging(false);
   };
 
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
+    dragDepthRef.current = 0;
     const discovered = await extractFilesFromDataTransfer(e.dataTransfer);
     if (discovered.length > 0) {
       setSelectedDiscoveredFiles((prev) => [...prev, ...discovered]);
     }
   };
+
+  useEffect(() => {
+    const urls = selectedDiscoveredFiles.map((item) =>
+      item.file.type.startsWith("image/") ? URL.createObjectURL(item.file) : ""
+    );
+    setPreviewUrls(urls);
+    return () => {
+      for (const url of urls) {
+        if (url) URL.revokeObjectURL(url);
+      }
+    };
+  }, [selectedDiscoveredFiles]);
 
   // Presets
   const applySampleNotePreset = () => {
@@ -314,6 +346,20 @@ export const App: React.FC = () => {
         setProgress(p);
       };
 
+      sender.onFileComplete = (file, sha256) => {
+        setVerifiedSent((prev) => [
+          ...prev,
+          {
+            id: file.id,
+            name: file.name,
+            relativePath: file.relativePath,
+            size: file.size,
+            mime: file.mime,
+            sha256,
+          },
+        ]);
+      };
+
       sender.onAllComplete = () => {
         smRef.current.transition("done");
       };
@@ -344,7 +390,25 @@ export const App: React.FC = () => {
     }
   };
 
-  // Determine active stepper step index
+  const handleApplyAnswerRef = useRef<(rawAnswer: string) => void>(() => {});
+  const startReceiverFlowRef = useRef<(blob: string) => void>(() => {});
+
+  useEffect(() => {
+    handleApplyAnswerRef.current = handleApplyAnswer;
+    startReceiverFlowRef.current = startReceiverFlow;
+  });
+
+  const onAnswerScanned = useCallback((text: string) => {
+    void handleApplyAnswerRef.current(text);
+  }, []);
+
+  const onOfferScanned = useCallback((text: string) => {
+    setShowOfferScanner(false);
+    const parsed = parseHandshakePayload(text);
+    if (parsed.blob) void startReceiverFlowRef.current(parsed.blob);
+  }, []);
+
+  // Determine active stepper step index. Keep the last good step if pairing fails.
   let stepperIndex = 0;
   if (role === "sender") {
     if (status === "idle") stepperIndex = 0;
@@ -357,6 +421,9 @@ export const App: React.FC = () => {
     else if (status === "connected" || status === "transferring") stepperIndex = 2;
     else if (status === "done") stepperIndex = 3;
   }
+  useEffect(() => {
+    if (status !== "failed") setStableStep(stepperIndex);
+  }, [status, stepperIndex]);
 
   const effectiveSenderFiles = sendMode === "text"
     ? (textSnippet.trim() ? [{ file: new File([textSnippet], snippetTitle || "snippet.txt"), relativePath: snippetTitle || "snippet.txt" }] : [])
@@ -371,7 +438,7 @@ export const App: React.FC = () => {
         <div className="header-nav">
           <div className="logo-group">
             <span className="brand-logo">qrtc</span>
-            <span className="badge-tag">P2P v1.2</span>
+            <span className="badge-tag">Private</span>
           </div>
           {role && (
             <button
@@ -389,20 +456,22 @@ export const App: React.FC = () => {
         </div>
 
         {/* Polished Hero */}
-        <div className="hero-section">
+        <div className={`hero-section ${role ? "hero-compact" : ""}`}>
           <h1 className="hero-title">
-            Send files between your phone and computer. No app, no upload, no account.
+            Send files between your phone and computer.
+            <span className="hero-quiet"> No app, no upload, no account.</span>
           </h1>
-          <p className="hero-subtitle">
-            Direct device-to-device streaming over WebRTC. The handshake is a QR code. Your data never touches a server.
-          </p>
+          {!role && (
+            <p className="hero-subtitle">
+              Open this page on both devices. One shows a code, the other scans it, and the file moves straight across. Nothing is uploaded.
+            </p>
+          )}
         </div>
 
-        {/* Stepper (when a role is active) */}
         {role && (
           <Stepper
             steps={role === "sender" ? SENDER_STEPS : RECEIVER_STEPS}
-            currentStepIndex={stepperIndex}
+            currentStepIndex={status === "failed" ? stableStep : stepperIndex}
           />
         )}
       </header>
@@ -413,7 +482,7 @@ export const App: React.FC = () => {
           <div className="role-grid">
             <button
               type="button"
-              className="role-button role-card-send"
+              className="role-button role-button-primary role-card-send"
               onClick={() => {
                 setRole("sender");
                 smRef.current.setRole("sender");
@@ -429,7 +498,7 @@ export const App: React.FC = () => {
               <div className="role-info">
                 <span className="role-title">Send</span>
                 <span className="role-desc">
-                  Pick files, folders, or snippets and show a QR code for your other device to scan.
+                  Pick files, a folder, or a note. The other device scans your code.
                 </span>
               </div>
             </button>
@@ -452,7 +521,7 @@ export const App: React.FC = () => {
               <div className="role-info">
                 <span className="role-title">Receive</span>
                 <span className="role-desc">
-                  Scan a QR code from the sending device or paste a handshake link.
+                  Scan the code on the sending device, or paste it if the camera is unavailable.
                 </span>
               </div>
             </button>
@@ -460,21 +529,21 @@ export const App: React.FC = () => {
 
           {/* Friendly Presets */}
           <div className="presets-bar">
-            <span className="presets-label">Quick test presets:</span>
+            <span className="presets-label">Try an example</span>
             <div className="presets-btns">
               <button
                 type="button"
                 className="btn-preset"
                 onClick={applySampleNotePreset}
               >
-                📝 Sample note
+                Sample note
               </button>
               <button
                 type="button"
                 className="btn-preset"
                 onClick={applySampleDemoPreset}
               >
-                🖼️ Demo vector art
+                Sample picture
               </button>
             </div>
           </div>
@@ -482,17 +551,14 @@ export const App: React.FC = () => {
           {/* Technical Details Accordion */}
           <details className="tech-details-accordion">
             <summary className="tech-details-summary">
-              How does serverless zero-signaling work?
+              Details
             </summary>
             <div className="tech-details-content">
               <p>
-                Standard WebRTC requires a central signaling server to exchange session descriptions (SDPs).
-                <strong> qrtc</strong> compresses the full SDP into an ultra-compact binary payload using
-                RFC-compliant compact candidate encoding and <code>deflate-raw</code>.
+                The two devices connect directly. There is no account and no upload. A short code, shown as a QR code, is enough for them to find each other.
               </p>
               <p>
-                By scanning each other's QR codes (or copying the short fallback link), devices establish a direct
-                peer-to-peer <code>RTCDataChannel</code> with end-to-end streaming SHA-256 integrity verification.
+                Under the hood the code is a compressed WebRTC session description. Each file is checked with SHA-256 before it is saved. Technical notes are in the README.
               </p>
             </div>
           </details>
@@ -540,6 +606,7 @@ export const App: React.FC = () => {
                   {/* Drag and Drop Zone */}
                   <div
                     className={`dropzone ${isDragging ? "active" : ""}`}
+                    onDragEnter={handleDragEnter}
                     onDragOver={handleDragOver}
                     onDragLeave={handleDragLeave}
                     onDrop={handleDrop}
@@ -551,9 +618,9 @@ export const App: React.FC = () => {
                         <path d="m16 16-4-4-4 4" />
                       </svg>
                     </div>
-                    <span className="dropzone-title">Drag & drop files or folders here</span>
+                    <span className="dropzone-title">Drop files or a folder here</span>
                     <span className="dropzone-sub">
-                      Folder structures and relative paths are preserved
+                      You can add more than one. Folders keep their folder names.
                     </span>
 
                     <div className="dropzone-action-buttons">
@@ -607,6 +674,9 @@ export const App: React.FC = () => {
                       <div className="file-list">
                         {selectedDiscoveredFiles.map((item, idx) => (
                           <div key={`${item.relativePath}-${idx}`} className="file-item">
+                            {previewUrls[idx] && (
+                              <img src={previewUrls[idx]} alt="" className="file-thumb" />
+                            )}
                             <div className="file-item-info">
                               <span className="file-name" title={item.relativePath}>
                                 {item.relativePath}
@@ -626,6 +696,19 @@ export const App: React.FC = () => {
                       </div>
                     </div>
                   )}
+
+                  {selectedDiscoveredFiles.length === 0 && (
+                    <p className="empty-hint">
+                      Nothing selected yet.
+                      <button type="button" className="btn-text-subtle" onClick={applySampleNotePreset}>
+                        Try a sample note
+                      </button>
+                      <span>or</span>
+                      <button type="button" className="btn-text-subtle" onClick={applySampleDemoPreset}>
+                        a sample picture
+                      </button>
+                    </p>
+                  )}
                 </>
               ) : (
                 /* Text Snippet Input */
@@ -640,12 +723,15 @@ export const App: React.FC = () => {
                   <textarea
                     className="code-area"
                     rows={6}
-                    placeholder="Paste or type text, link, code snippet, or credentials to send..."
+                    placeholder="Type a note, a link, or anything you want the other device to copy."
                     value={textSnippet}
                     onChange={(e) => setTextSnippet(e.target.value)}
                   />
+                  {!textSnippet.trim() && (
+                    <p className="empty-hint">Nothing to send yet. Type a note, or paste one from your clipboard.</p>
+                  )}
                   <span className="dropzone-sub">
-                    The receiving device will be able to copy this snippet to their clipboard with one click.
+                    The other device gets a Copy button for this text.
                   </span>
                 </div>
               )}
@@ -671,9 +757,9 @@ export const App: React.FC = () => {
             <div className="card loading-card">
               <div className="loading-spinner" />
               <div>
-                <h3 className="card-title">Preparing direct transfer</h3>
+                <h3 className="card-title">Getting your code ready</h3>
                 <p className="card-subtitle">
-                  Gathering local network candidates and generating compressed handshake...
+                  This usually takes a few seconds. Keep this page open.
                 </p>
               </div>
             </div>
@@ -682,21 +768,22 @@ export const App: React.FC = () => {
           {status === "awaiting-answer" && (
             <>
               <QrCard
-                title="1. Scan with receiving device"
-                subtitle="Open your phone camera or qrtc on your other device to scan this code"
+                title="Show this code to the other device"
+                subtitle="On the other device, open this page, choose Receive, and scan the code."
                 payload={offerCompressed}
                 url={offerUrl}
                 stepBadge="Step 1 of 2"
+                waitingLabel="Waiting for the other device to scan"
               />
 
               <div className="card">
                 <div>
                   <span className="step-pill">Step 2 of 2</span>
                   <h3 className="card-title" style={{ marginTop: "6px" }}>
-                    Complete the handshake
+                    Finish pairing
                   </h3>
                   <p className="card-subtitle">
-                    Once the receiver scans Step 1, it will display a matching answer code.
+                    The other device will show a second code. Scan it, or paste it below.
                   </p>
                 </div>
 
@@ -710,19 +797,20 @@ export const App: React.FC = () => {
                       <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
                       <circle cx="12" cy="13" r="4" />
                     </svg>
-                    Scan receiver answer QR
+                    Scan the answer code
                   </button>
                 </div>
 
                 {/* Short Paste-Code Fallback */}
                 <div className="paste-fallback-box">
                   <label className="field-label" htmlFor="answer-code-input">
-                    Or paste receiver answer code
+                    Or paste the answer code
                   </label>
                   <textarea
                     id="answer-code-input"
                     className="code-area"
-                    placeholder="Paste receiver answer code here..."
+                    spellCheck={false}
+                    placeholder="Paste the answer code here"
                     value={manualAnswer}
                     onChange={(e) => setManualAnswer(e.target.value)}
                   />
@@ -743,9 +831,9 @@ export const App: React.FC = () => {
             <div className="card loading-card">
               <div className="loading-spinner" />
               <div>
-                <h3 className="card-title">Connecting to peer</h3>
+                <h3 className="card-title">Connecting the two devices</h3>
                 <p className="card-subtitle">
-                  Performing direct WebRTC connectivity checks...
+                  Keep both screens open. This usually takes a few seconds.
                 </p>
               </div>
             </div>
@@ -756,14 +844,7 @@ export const App: React.FC = () => {
               role="sender"
               safetyCode={safetyCode}
               progress={progress}
-              completedFiles={effectiveSenderFiles.map((item, i) => ({
-                id: String(i),
-                name: item.file.name,
-                relativePath: item.relativePath,
-                size: item.file.size,
-                mime: item.file.type,
-                sha256: "",
-              }))}
+              completedFiles={verifiedSent}
               isDone={status === "done"}
             />
           )}
@@ -784,9 +865,9 @@ export const App: React.FC = () => {
           {status === "idle" && (
             <div className="card">
               <div>
-                <h2 className="card-title">Receive from another device</h2>
+                <h2 className="card-title">Receive from the other device</h2>
                 <p className="card-subtitle">
-                  Scan the sender's offer QR code or paste their handshake code.
+                  Scan the code it is showing, or paste that code below.
                 </p>
               </div>
 
@@ -800,19 +881,20 @@ export const App: React.FC = () => {
                     <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
                     <circle cx="12" cy="13" r="4" />
                   </svg>
-                  Scan sender QR code
+                  Scan the code
                 </button>
               </div>
 
               {/* Paste offer fallback */}
               <form onSubmit={handleManualOfferSubmit} className="paste-fallback-box">
                 <label className="field-label" htmlFor="offer-code-input">
-                  Or paste offer code or link
+                  Or paste the code or link
                 </label>
                 <textarea
                   id="offer-code-input"
                   className="code-area"
-                  placeholder="https://...#o=... or raw handshake code"
+                  spellCheck={false}
+                  placeholder="Paste a code or a link from the other device"
                   value={manualOffer}
                   onChange={(e) => setManualOffer(e.target.value)}
                 />
@@ -821,7 +903,7 @@ export const App: React.FC = () => {
                   className="btn-secondary"
                   disabled={!manualOffer.trim()}
                 >
-                  Connect with offer
+                  Connect
                 </button>
               </form>
             </div>
@@ -831,9 +913,9 @@ export const App: React.FC = () => {
             <div className="card loading-card">
               <div className="loading-spinner" />
               <div>
-                <h3 className="card-title">Preparing connection</h3>
+                <h3 className="card-title">Getting ready</h3>
                 <p className="card-subtitle">
-                  Generating answer and setting up local peer connection...
+                  Creating your answer code. This usually takes a few seconds.
                 </p>
               </div>
             </div>
@@ -842,17 +924,18 @@ export const App: React.FC = () => {
           {status === "awaiting-answer" && answerCompressed && (
             <>
               <QrCard
-                title="Show this answer to sender"
-                subtitle="Have the sender scan this QR code or copy the raw code below"
+                title="Show this code to the sender"
+                subtitle="The sending device scans this code, or you can copy it and paste it there."
                 payload={answerCompressed}
                 stepBadge="Step 2 of 2"
+                waitingLabel="Waiting for the sender to scan"
               />
               <div className="card loading-card">
                 <div className="loading-spinner" />
                 <div>
-                  <h3 className="card-title">Waiting for sender</h3>
+                  <h3 className="card-title">Waiting for the sender</h3>
                   <p className="card-subtitle">
-                    Once the sender applies this answer, the data channel opens automatically.
+                    Once they scan or paste this code, the file starts moving on its own.
                   </p>
                 </div>
               </div>
@@ -905,22 +988,16 @@ export const App: React.FC = () => {
       {/* Camera QR Scanner Modals */}
       {showAnswerScanner && (
         <ScannerModal
-          promptText="Scan receiver answer QR"
-          onScan={(text) => handleApplyAnswer(text)}
+          promptText="Scan the answer code"
+          onScan={onAnswerScanned}
           onClose={() => setShowAnswerScanner(false)}
         />
       )}
 
       {showOfferScanner && (
         <ScannerModal
-          promptText="Scan sender offer QR"
-          onScan={(text) => {
-            setShowOfferScanner(false);
-            const parsed = parseHandshakePayload(text);
-            if (parsed.blob) {
-              startReceiverFlow(parsed.blob);
-            }
-          }}
+          promptText="Scan the sender's code"
+          onScan={onOfferScanned}
           onClose={() => setShowOfferScanner(false)}
         />
       )}
@@ -931,9 +1008,9 @@ export const App: React.FC = () => {
       {/* Footer */}
       <footer className="site-footer">
         <div className="footer-left">
-          <span>qrtc · Peer-to-peer WebRTC</span>
+          <span>qrtc</span>
           <span className="footer-dot">·</span>
-          <span>No servers, no tracking</span>
+          <span>Direct. Nothing is uploaded.</span>
         </div>
         <div className="footer-right">
           <a href="https://github.com/gfxroy/qrtc" target="_blank" rel="noopener noreferrer">

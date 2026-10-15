@@ -25,12 +25,14 @@ export const TransferView: React.FC<TransferViewProps> = ({
   const totalFiles = progress?.totalFiles ?? Math.max(1, completedFiles.length);
   const fileIndex = Math.min(totalFiles, (progress?.fileIndex ?? 0) + 1);
   const currentFileName = progress?.fileName ?? "";
+  const verified = completedFiles.some((file) => Boolean(file.sha256));
+  const zipSources = completedFiles.filter((file) => file.blob || file.data);
 
   const handleDownloadAllZip = async () => {
-    if (completedFiles.length === 0 || zipping) return;
+    if (zipSources.length === 0 || zipping) return;
     try {
       setZipping(true);
-      const zipBlob = await createZipArchive(completedFiles);
+      const zipBlob = await createZipArchive(zipSources);
       const url = URL.createObjectURL(zipBlob);
       // Trigger download
       const a = document.createElement("a");
@@ -56,19 +58,18 @@ export const TransferView: React.FC<TransferViewProps> = ({
             {role === "sender" ? "Sender" : "Receiver"}
           </span>
           <h2 className="transfer-title">
-            {isDone ? "Transfer complete" : role === "sender" ? "Sending files..." : "Receiving files..."}
+            {isDone ? "Transfer complete" : role === "sender" ? "Sending" : "Receiving"}
           </h2>
           <p className="card-subtitle">
             {isDone
-              ? "All files transferred directly over peer-to-peer data channel."
+              ? "The file moved straight from one device to the other."
               : currentFileName
-              ? `Transferring ${currentFileName} (${fileIndex} of ${totalFiles})`
-              : `Processing ${totalFiles} item${totalFiles > 1 ? "s" : ""}...`}
+              ? `${currentFileName} · ${fileIndex} of ${totalFiles}`
+              : "Starting the transfer. Keep both screens open."}
           </p>
         </div>
 
-        {/* Verified Badge / Notice */}
-        {completedFiles.length > 0 && (
+        {verified && (
           <div className="verified-pill-box">
             <span className="verified-badge">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -84,8 +85,8 @@ export const TransferView: React.FC<TransferViewProps> = ({
       {safetyCode && (
         <div className="safety-box">
           <div className="safety-header">
-            <span className="safety-label">Safety Code · Compare with peer</span>
-            <span className="safety-sub">Guarantees no tampering or interception</span>
+            <span className="safety-label">Safety code</span>
+            <span className="safety-sub">These four words should match on both devices</span>
           </div>
           <span className="safety-code">{safetyCode}</span>
         </div>
@@ -100,7 +101,7 @@ export const TransferView: React.FC<TransferViewProps> = ({
           <div className="completed-header-row">
             <div className="completed-title-box">
               <h3 className="section-title">
-                {role === "sender" ? "Transferred files" : "Received files (SHA-256 verified)"}
+                {role === "sender" ? "Sent" : "Received"}
               </h3>
               <span className="file-count-badge">
                 {completedFiles.length} {completedFiles.length === 1 ? "file" : "files"} (
@@ -109,7 +110,7 @@ export const TransferView: React.FC<TransferViewProps> = ({
             </div>
 
             {/* "Download all" as ZIP button */}
-            {role === "receiver" && completedFiles.length > 1 && (
+            {role === "receiver" && zipSources.length > 0 && (
               <button
                 type="button"
                 className="btn-secondary btn-zip-all"
@@ -121,7 +122,7 @@ export const TransferView: React.FC<TransferViewProps> = ({
                   <polyline points="7 10 12 15 17 10" />
                   <line x1="12" y1="15" x2="12" y2="3" />
                 </svg>
-                {zipping ? "Creating ZIP..." : "Download all as ZIP"}
+                {zipping ? "Preparing zip…" : "Download all"}
               </button>
             )}
           </div>

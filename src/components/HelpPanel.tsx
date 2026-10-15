@@ -21,7 +21,7 @@ export const HelpPanel: React.FC<HelpPanelProps> = ({ initiallyOpen = false }) =
             <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
             <line x1="12" y1="17" x2="12.01" y2="17" />
           </svg>
-          Troubleshooting & Connection Tips
+          If the connection fails
         </span>
         <span className="help-toggle-icon">{isOpen ? "−" : "+"}</span>
       </button>
@@ -29,30 +29,30 @@ export const HelpPanel: React.FC<HelpPanelProps> = ({ initiallyOpen = false }) =
       {isOpen && (
         <div className="help-content">
           <div className="help-item">
-            <h4 className="help-item-title">1. Connect both devices to the same Wi-Fi</h4>
+            <h4 className="help-item-title">Use the same Wi-Fi</h4>
             <p className="help-item-desc">
-              WebRTC connects devices directly without intermediate servers. Being on the same home or office Wi-Fi, or sharing a mobile personal hotspot, enables instantaneous peer discovery over local LAN.
+              The devices talk to each other directly. Put both on the same home or office Wi-Fi, or turn on a phone hotspot and join it from the other device.
             </p>
           </div>
 
           <div className="help-item">
-            <h4 className="help-item-title">2. Mobile cellular data & Symmetric NAT</h4>
+            <h4 className="help-item-title">Mobile data and symmetric NAT</h4>
             <p className="help-item-desc">
-              Cellular carriers use Carrier-Grade NAT (CGNAT / symmetric NAT) that blocks unsolicited incoming peer packets. If both phones are on pure 4G/5G without a common Wi-Fi, turn on one phone's Personal Hotspot and connect the other device.
+              Cellular networks usually put phones behind symmetric NAT, which blocks a direct connection when both sides are on mobile data. There is no relay server. Share a hotspot, or move both devices onto the same Wi-Fi.
             </p>
           </div>
 
           <div className="help-item">
-            <h4 className="help-item-title">3. Keep browser in foreground on phones</h4>
+            <h4 className="help-item-title">Keep the phone screen on</h4>
             <p className="help-item-desc">
-              iOS Safari and mobile browsers suspend background network timers when the screen locks or when switching apps. Keep this tab open until the transfer circle reaches 100%.
+              Phones pause the page when the screen locks or you switch apps. Leave this tab open until the ring reaches 100%.
             </p>
           </div>
 
           <div className="help-item">
-            <h4 className="help-item-title">4. Camera permission</h4>
+            <h4 className="help-item-title">Camera blocked</h4>
             <p className="help-item-desc">
-              Camera access requires a secure connection. If camera scanning is denied or unavailable, use the "Copy link" or "Copy raw code" button and paste it directly.
+              The camera only works on a secure page. If permission is denied, use Copy link or Copy raw code and paste it on the other device.
             </p>
           </div>
         </div>

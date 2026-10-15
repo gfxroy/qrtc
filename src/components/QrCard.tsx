@@ -7,6 +7,7 @@ interface QrCardProps {
   payload: string;
   url?: string;
   stepBadge?: string;
+  waitingLabel?: string;
 }
 
 export const QrCard: React.FC<QrCardProps> = ({
@@ -15,6 +16,7 @@ export const QrCard: React.FC<QrCardProps> = ({
   payload,
   url,
   stepBadge,
+  waitingLabel = "Waiting for the other device to scan",
 }) => {
   const [svgHtml, setSvgHtml] = useState<string>("");
   const [copiedLink, setCopiedLink] = useState(false);
@@ -78,7 +80,7 @@ export const QrCard: React.FC<QrCardProps> = ({
           <div className="qr-pulse-ring" />
         </div>
         <span className="qr-waiting-text">
-          <span className="waiting-dot" /> Waiting for peer to scan...
+          <span className="waiting-dot" /> {waitingLabel}
         </span>
       </div>
 
