@@ -2,7 +2,7 @@
   "name": "qrtc",
   "private": true,
   "version": "1.0.0",
-  "description": "Send a file between two devices directly. No server, no account — the handshake is a QR code.",
+  "description": "Send files between your phone and computer. No app, no upload, no account.",
   "type": "module",
   "license": "MIT",
   "scripts": {
